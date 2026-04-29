@@ -7,7 +7,30 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+import logging
+import traceback
 from tkinter import filedialog, messagebox, ttk
+
+# Set up logging to file
+try:
+    log_file = os.path.join(os.getcwd(), "loopy_loop.log")
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        filemode='w'
+    )
+except Exception:
+    # Fallback to temp directory if current directory is not writable
+    log_file = os.path.join(tempfile.gettempdir(), "loopy_loop.log")
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        filemode='w'
+    )
+
+logging.info("Application starting...")
 
 try:
     import imageio_ffmpeg
@@ -455,7 +478,7 @@ class LoopyLoopApp:
 
     def get_duration(self, path):
         if not self.ffmpeg_path:
-            raise RuntimeError("FFmpeg was not found. Run: python -m pip install imageio-ffmpeg")
+            raise RuntimeError("FFmpeg was not found. Please install it.")
 
         cmd = [self.ffmpeg_path, "-hide_banner", "-i", path]
 
@@ -478,8 +501,7 @@ class LoopyLoopApp:
         if not self.ffmpeg_path:
             raise ValueError(
                 "FFmpeg was not found.\n\n"
-                "Run this in VS Code terminal:\n"
-                "python -m pip install imageio-ffmpeg"
+                "Please install FFmpeg and make sure it is in your PATH."
             )
 
         if not self.video_files:
@@ -502,8 +524,8 @@ class LoopyLoopApp:
         if url_audio and get_ytdlp() is None:
             raise ValueError(
                 "yt-dlp is not installed in this Python environment.\n\n"
-                "Run this in your VS Code terminal:\n"
-                "python -m pip install yt-dlp"
+                "Run this in your terminal:\n"
+                "pip install yt-dlp"
             )
 
         for video in self.video_files:
@@ -550,16 +572,40 @@ class LoopyLoopApp:
         yt_dlp = get_ytdlp()
 
         if yt_dlp is None:
-            raise RuntimeError("yt-dlp missing. Run: python -m pip install yt-dlp")
+            raise RuntimeError("yt-dlp missing. Run: pip install yt-dlp")
 
         self.safe_ui(lambda: self.status_text.set("Downloading YouTube audio..."))
+        logging.info(f"Downloading YouTube audio from: {url}")
 
         output_template = os.path.join(temp_dir, "youtube_audio.%(ext)s")
+        
+        # yt-dlp's FFmpegExtractAudio postprocessor specifically looks for 'ffmpeg' or 'ffmpeg.exe'
+        ffmpeg_dir = os.path.dirname(self.ffmpeg_path)
+        ffmpeg_bin = os.path.basename(self.ffmpeg_path).lower()
+        
+        if not ffmpeg_bin.startswith("ffmpeg") or (ffmpeg_bin != "ffmpeg" and ffmpeg_bin != "ffmpeg.exe"):
+            logging.info(f"Creating ffmpeg shim for {self.ffmpeg_path}")
+            shim_dir = os.path.join(temp_dir, "ffmpeg_shim")
+            os.makedirs(shim_dir, exist_ok=True)
+            shim_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+            shim_path = os.path.join(shim_dir, shim_name)
+            
+            try:
+                if os.name != "nt":
+                    os.symlink(self.ffmpeg_path, shim_path)
+                else:
+                    # Windows symlinks often fail, just copy
+                    shutil.copy2(self.ffmpeg_path, shim_path)
+            except Exception as e:
+                logging.warning(f"Symlink/copy failed, attempting copy: {e}")
+                shutil.copy2(self.ffmpeg_path, shim_path)
+            
+            ffmpeg_dir = shim_dir
 
         options = {
             "format": "bestaudio/best",
             "outtmpl": output_template,
-            "quiet": True,
+            "quiet": False,
             "noplaylist": True,
             "postprocessors": [
                 {
@@ -568,17 +614,24 @@ class LoopyLoopApp:
                     "preferredquality": "192",
                 }
             ],
-            "ffmpeg_location": os.path.dirname(self.ffmpeg_path)
+            "ffmpeg_location": ffmpeg_dir
         }
 
-        with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.download([url])
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.download([url])
+        except Exception as e:
+            logging.error(f"yt-dlp download failed: {e}")
+            logging.error(traceback.format_exc())
+            raise RuntimeError(f"YouTube download failed: {str(e)}")
 
         mp3_path = os.path.join(temp_dir, "youtube_audio.mp3")
 
         if not os.path.exists(mp3_path):
+            logging.error(f"MP3 file not found at {mp3_path}")
             raise RuntimeError("YouTube audio could not be converted to MP3.")
 
+        logging.info("YouTube audio download and conversion successful.")
         return mp3_path
 
     def set_progress(self, current):
@@ -741,13 +794,19 @@ class LoopyLoopApp:
                 return
 
             if return_code != 0:
-                raise RuntimeError("\n".join(error_lines[-12:]) or "FFmpeg failed.")
+                error_msg = "\n".join(error_lines[-12:]) or "FFmpeg failed."
+                logging.error(f"FFmpeg process failed with return code {return_code}")
+                logging.error(f"FFmpeg error output: {error_msg}")
+                raise RuntimeError(error_msg)
 
             self.set_progress(self.total_seconds)
             self.safe_ui(lambda: self.status_text.set("Completed"))
+            logging.info("Job completed successfully.")
             self.safe_ui(lambda: messagebox.showinfo("Done", f"Finished!\nSaved to:\n{output}"))
 
         except Exception as e:
+            logging.error("An error occurred during run_ffmpeg:")
+            logging.error(traceback.format_exc())
             self.safe_ui(lambda: self.status_text.set("Error"))
             self.safe_ui(lambda: messagebox.showerror("Error", str(e)))
 
@@ -799,6 +858,18 @@ class LoopyLoopApp:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = LoopyLoopApp(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = LoopyLoopApp(root)
+        root.mainloop()
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        logging.critical(f"Unhandled exception during startup:\n{error_trace}")
+        
+        # Try to show a graphical error message
+        try:
+            import tkinter.messagebox as mb
+            mb.showerror("Startup Error", f"The application failed to start.\n\nError: {e}\n\nCheck 'loopy_loop.log' for details.")
+        except Exception:
+            print(f"CRITICAL ERROR: {e}")
+            print(error_trace)
