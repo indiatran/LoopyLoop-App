@@ -1,0 +1,33 @@
+2026-04-29 22:44:46,257 - INFO - Application starting...
+2026-04-29 22:45:03,557 - INFO - Running FFmpeg command:
+2026-04-29 22:45:03,557 - INFO - C:\Users\india\Desktop\it-projects\.venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg-win-x86_64-v7.1.exe -y -hide_banner -nostats -stream_loop -1 -f concat -safe 0 -i C:\Users\india\AppData\Local\Temp\tmp3rsdj96y.txt -stream_loop -1 -i C:/Users/india/Downloads/5LZ6G3sVZoXqUy_aoZr9Y_output.mp4 -map 0:v:0 -map 1:a:0 -t 3600.0 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart -progress pipe:1 C:/Users/india/Downloads\loopy_loop_output.mp4
+2026-04-29 22:45:03,655 - ERROR - FFmpeg failed with return code 4294967274
+2026-04-29 22:45:03,655 - ERROR - compatible_brands: isomiso2avc1mp41
+encoder         : Lavf58.76.100
+Duration: 00:00:05.88, start: 0.000000, bitrate: 9141 kb/s
+Stream #1:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080, 9138 kb/s, 24 fps, 24 tbr, 12288 tbn (default)
+Metadata:
+handler_name    : VideoHandler
+vendor_id       : [0][0][0][0]
+Stream map '' matches no streams.
+To ignore this, add a trailing '?' to the map.
+Failed to set value '1:a:0' for option 'map': Invalid argument
+Error parsing options for output file C:/Users/india/Downloads\loopy_loop_output.mp4.
+Error opening output files: Invalid argument
+2026-04-29 22:45:03,655 - ERROR - An error occurred during run_ffmpeg:
+2026-04-29 22:45:03,656 - ERROR - Traceback (most recent call last):
+  File "c:\Users\india\Desktop\it-projects\LoopyLoop App\main.py", line 800, in run_ffmpeg
+    raise RuntimeError(error_msg)
+RuntimeError: compatible_brands: isomiso2avc1mp41
+encoder         : Lavf58.76.100
+Duration: 00:00:05.88, start: 0.000000, bitrate: 9141 kb/s
+Stream #1:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080, 9138 kb/s, 24 fps, 24 tbr, 12288 tbn (default)
+Metadata:
+handler_name    : VideoHandler
+vendor_id       : [0][0][0][0]
+Stream map '' matches no streams.
+To ignore this, add a trailing '?' to the map.
+Failed to set value '1:a:0' for option 'map': Invalid argument
+Error parsing options for output file C:/Users/india/Downloads\loopy_loop_output.mp4.
+Error opening output files: Invalid argument
+

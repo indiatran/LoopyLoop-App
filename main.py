@@ -11,27 +11,6 @@ import logging
 import traceback
 from tkinter import filedialog, messagebox, ttk
 
-# Set up logging to file
-try:
-    log_file = os.path.join(os.getcwd(), "loopy_loop.log")
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        filemode='w'
-    )
-except Exception:
-    # Fallback to temp directory if current directory is not writable
-    log_file = os.path.join(tempfile.gettempdir(), "loopy_loop.log")
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        filemode='w'
-    )
-
-logging.info("Application starting...")
-
 try:
     import imageio_ffmpeg
 except ImportError:
@@ -63,6 +42,8 @@ class LoopyLoopApp:
         self.target_hours = tk.StringVar(value="1")
         self.loop_count = tk.StringVar(value="2")
         self.dark_mode = tk.BooleanVar(value=False)
+
+        self.audio_volume = tk.DoubleVar(value=100)
 
         self.progress_value = tk.DoubleVar(value=0)
         self.progress_text = tk.StringVar(value="0.0%")
@@ -118,7 +99,7 @@ class LoopyLoopApp:
         self.add_widget(
             tk.Label(
                 self.main,
-                text="Add videos, use local audio or a YouTube audio URL, then create your looped MP4.",
+                text="Select videos, add optional audio, choose loop settings, then click START.",
                 font=("Arial", 11)
             ),
             "normal_root"
@@ -185,6 +166,35 @@ class LoopyLoopApp:
         )
 
         self.add_widget(
+            tk.Label(
+                middle,
+                text="Upgrade: You may select MP3/WAV/M4A or even MP4 video with audio.",
+                font=("Arial", 8)
+            ),
+            "small"
+        ).pack(anchor="w")
+
+        self.add_widget(
+            tk.Label(middle, text="Audio Volume", font=("Arial", 10, "bold")),
+            "section"
+        ).pack(anchor="w", pady=(10, 0))
+
+        self.volume_label = self.add_widget(
+            tk.Label(middle, text="100%", font=("Arial", 9, "bold")),
+            "normal_card"
+        )
+        self.volume_label.pack(anchor="w")
+
+        volume_slider = ttk.Scale(
+            middle,
+            from_=0,
+            to=200,
+            variable=self.audio_volume,
+            command=self.update_volume_label
+        )
+        volume_slider.pack(fill="x", pady=(0, 8))
+
+        self.add_widget(
             tk.Label(middle, text="YouTube Audio URL", font=("Arial", 10, "bold")),
             "section"
         ).pack(anchor="w", pady=(10, 0))
@@ -234,10 +244,7 @@ class LoopyLoopApp:
             "entry"
         ).grid(row=0, column=1, padx=8)
 
-        self.add_widget(
-            tk.Label(settings, text="hours"),
-            "normal_card"
-        ).grid(row=0, column=2)
+        self.add_widget(tk.Label(settings, text="hours"), "normal_card").grid(row=0, column=2)
 
         self.add_widget(
             tk.Radiobutton(settings, text="Loop Count", variable=self.mode, value="loops"),
@@ -249,10 +256,7 @@ class LoopyLoopApp:
             "entry"
         ).grid(row=1, column=1, padx=8)
 
-        self.add_widget(
-            tk.Label(settings, text="loops"),
-            "normal_card"
-        ).grid(row=1, column=2)
+        self.add_widget(tk.Label(settings, text="loops"), "normal_card").grid(row=1, column=2)
 
         progress = self.add_widget(
             tk.LabelFrame(
@@ -295,6 +299,9 @@ class LoopyLoopApp:
 
         self.folder_button = self.make_button(button_bar, "📂 FOLDER", "#06D6A0", self.open_output_folder)
         self.folder_button.pack(side="left", expand=True, fill="x", padx=5)
+
+    def update_volume_label(self, value=None):
+        self.volume_label.config(text=f"{int(self.audio_volume.get())}%")
 
     def file_section(self, parent, title, variable, command, button_text):
         self.add_widget(
@@ -441,11 +448,11 @@ class LoopyLoopApp:
 
     def browse_audio(self):
         file = filedialog.askopenfilename(
-            title="Select Audio File",
+            title="Select Audio File or Video With Audio",
             filetypes=[
-                ("Audio/MP4 Files", "*.mp3 *.wav *.aac *.m4a *.ogg *.mp4"),
-                ("MP3 Files", "*.mp3"),
-                ("MP4 Files", "*.mp4"),
+                ("Audio/Video Files", "*.mp3 *.wav *.aac *.m4a *.ogg *.mp4 *.mov *.mkv"),
+                ("Audio Files", "*.mp3 *.wav *.aac *.m4a *.ogg"),
+                ("Video Files", "*.mp4 *.mov *.mkv"),
                 ("All Files", "*.*")
             ]
         )
@@ -476,9 +483,9 @@ class LoopyLoopApp:
     def safe_ui(self, func):
         self.root.after(0, func)
 
-    def get_duration(self, path):
+    def get_file_info(self, path):
         if not self.ffmpeg_path:
-            raise RuntimeError("FFmpeg was not found. Please install it.")
+            raise RuntimeError("FFmpeg was not found.")
 
         cmd = [self.ffmpeg_path, "-hide_banner", "-i", path]
 
@@ -490,7 +497,18 @@ class LoopyLoopApp:
             creationflags=self.get_creation_flags()
         )
 
-        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", result.stdout)
+        return result.stdout
+
+    def has_audio_stream(self, path):
+        try:
+            info = self.get_file_info(path)
+            return "Audio:" in info
+        except Exception:
+            return False
+
+    def get_duration(self, path):
+        info = self.get_file_info(path)
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", info)
 
         if not match:
             raise RuntimeError(f"Unable to read duration:\n{path}")
@@ -501,7 +519,9 @@ class LoopyLoopApp:
         if not self.ffmpeg_path:
             raise ValueError(
                 "FFmpeg was not found.\n\n"
-                "Please install FFmpeg and make sure it is in your PATH."
+                "Run this in your terminal:\n"
+                "pip install imageio-ffmpeg\n\n"
+                "Then restart the app."
             )
 
         if not self.video_files:
@@ -523,7 +543,7 @@ class LoopyLoopApp:
 
         if url_audio and get_ytdlp() is None:
             raise ValueError(
-                "yt-dlp is not installed in this Python environment.\n\n"
+                "yt-dlp is not installed.\n\n"
                 "Run this in your terminal:\n"
                 "pip install yt-dlp"
             )
@@ -544,7 +564,8 @@ class LoopyLoopApp:
                 raise ValueError("Target hours must be a valid number.")
         else:
             try:
-                duration = total_playlist * int(self.loop_count.get().strip())
+                loops = int(self.loop_count.get().strip())
+                duration = total_playlist * loops
             except ValueError:
                 raise ValueError("Loop count must be a whole number.")
 
@@ -575,32 +596,9 @@ class LoopyLoopApp:
             raise RuntimeError("yt-dlp missing. Run: pip install yt-dlp")
 
         self.safe_ui(lambda: self.status_text.set("Downloading YouTube audio..."))
-        logging.info(f"Downloading YouTube audio from: {url}")
 
         output_template = os.path.join(temp_dir, "youtube_audio.%(ext)s")
-        
-        # yt-dlp's FFmpegExtractAudio postprocessor specifically looks for 'ffmpeg' or 'ffmpeg.exe'
         ffmpeg_dir = os.path.dirname(self.ffmpeg_path)
-        ffmpeg_bin = os.path.basename(self.ffmpeg_path).lower()
-        
-        if not ffmpeg_bin.startswith("ffmpeg") or (ffmpeg_bin != "ffmpeg" and ffmpeg_bin != "ffmpeg.exe"):
-            logging.info(f"Creating ffmpeg shim for {self.ffmpeg_path}")
-            shim_dir = os.path.join(temp_dir, "ffmpeg_shim")
-            os.makedirs(shim_dir, exist_ok=True)
-            shim_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-            shim_path = os.path.join(shim_dir, shim_name)
-            
-            try:
-                if os.name != "nt":
-                    os.symlink(self.ffmpeg_path, shim_path)
-                else:
-                    # Windows symlinks often fail, just copy
-                    shutil.copy2(self.ffmpeg_path, shim_path)
-            except Exception as e:
-                logging.warning(f"Symlink/copy failed, attempting copy: {e}")
-                shutil.copy2(self.ffmpeg_path, shim_path)
-            
-            ffmpeg_dir = shim_dir
 
         options = {
             "format": "bestaudio/best",
@@ -620,24 +618,23 @@ class LoopyLoopApp:
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
-        except Exception as e:
-            logging.error(f"yt-dlp download failed: {e}")
-            logging.error(traceback.format_exc())
-            raise RuntimeError(f"YouTube download failed: {str(e)}")
+        except Exception as err:
+            raise RuntimeError(f"YouTube download failed: {err}")
 
         mp3_path = os.path.join(temp_dir, "youtube_audio.mp3")
 
         if not os.path.exists(mp3_path):
-            logging.error(f"MP3 file not found at {mp3_path}")
             raise RuntimeError("YouTube audio could not be converted to MP3.")
 
-        logging.info("YouTube audio download and conversion successful.")
         return mp3_path
 
     def set_progress(self, current):
-        percent = max(0, min(100, (current / self.total_seconds) * 100))
-        elapsed = time.time() - self.start_time if self.start_time else 0
+        if self.total_seconds <= 0:
+            percent = 0
+        else:
+            percent = max(0, min(100, (current / self.total_seconds) * 100))
 
+        elapsed = time.time() - self.start_time if self.start_time else 0
         remaining = None
 
         if current > 0 and elapsed > 0:
@@ -672,8 +669,8 @@ class LoopyLoopApp:
 
         try:
             output, local_audio, url_audio, duration = self.validate_inputs()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+        except Exception as err:
+            messagebox.showerror("Error", str(err))
             return
 
         self.total_seconds = duration
@@ -716,12 +713,16 @@ class LoopyLoopApp:
                 "-i", concat_file
             ]
 
-            if audio:
+            audio_has_stream = bool(audio and self.has_audio_stream(audio))
+            volume_value = max(0, self.audio_volume.get() / 100)
+
+            if audio_has_stream:
                 cmd += [
                     "-stream_loop", "-1",
                     "-i", audio,
                     "-map", "0:v:0",
-                    "-map", "1:a:0"
+                    "-map", "1:a:0",
+                    "-filter:a", f"volume={volume_value}"
                 ]
             else:
                 cmd += [
@@ -741,6 +742,12 @@ class LoopyLoopApp:
                 "-progress", "pipe:1",
                 output
             ]
+
+            if audio and not audio_has_stream:
+                self.safe_ui(
+                    lambda: self.status_text.set("Selected audio had no sound. Using original video audio.")
+                )
+                time.sleep(1)
 
             self.safe_ui(lambda: self.status_text.set("Creating looped video..."))
 
@@ -766,7 +773,6 @@ class LoopyLoopApp:
                 if line.startswith("out_time_ms="):
                     try:
                         seconds = int(line.split("=", 1)[1]) / 1_000_000
-
                         if seconds >= last_seconds:
                             last_seconds = seconds
                             self.set_progress(seconds)
@@ -775,7 +781,6 @@ class LoopyLoopApp:
 
                 elif line.startswith("out_time="):
                     seconds = self.time_to_seconds(line.split("=", 1)[1])
-
                     if seconds is not None and seconds >= last_seconds:
                         last_seconds = seconds
                         self.set_progress(seconds)
@@ -795,20 +800,16 @@ class LoopyLoopApp:
 
             if return_code != 0:
                 error_msg = "\n".join(error_lines[-12:]) or "FFmpeg failed."
-                logging.error(f"FFmpeg process failed with return code {return_code}")
-                logging.error(f"FFmpeg error output: {error_msg}")
                 raise RuntimeError(error_msg)
 
             self.set_progress(self.total_seconds)
             self.safe_ui(lambda: self.status_text.set("Completed"))
-            logging.info("Job completed successfully.")
             self.safe_ui(lambda: messagebox.showinfo("Done", f"Finished!\nSaved to:\n{output}"))
 
-        except Exception as e:
-            logging.error("An error occurred during run_ffmpeg:")
-            logging.error(traceback.format_exc())
+        except Exception as err:
+            error_message = str(err)
             self.safe_ui(lambda: self.status_text.set("Error"))
-            self.safe_ui(lambda: messagebox.showerror("Error", str(e)))
+            self.safe_ui(lambda msg=error_message: messagebox.showerror("Error", msg))
 
         finally:
             if concat_file and os.path.exists(concat_file):
@@ -853,8 +854,8 @@ class LoopyLoopApp:
                 subprocess.run(["open", folder], check=False)
             else:
                 subprocess.run(["xdg-open", folder], check=False)
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not open folder:\n{e}")
+        except Exception as err:
+            messagebox.showerror("Error", f"Could not open folder:\n{err}")
 
 
 if __name__ == "__main__":
@@ -862,14 +863,6 @@ if __name__ == "__main__":
         root = tk.Tk()
         app = LoopyLoopApp(root)
         root.mainloop()
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        logging.critical(f"Unhandled exception during startup:\n{error_trace}")
-        
-        # Try to show a graphical error message
-        try:
-            import tkinter.messagebox as mb
-            mb.showerror("Startup Error", f"The application failed to start.\n\nError: {e}\n\nCheck 'loopy_loop.log' for details.")
-        except Exception:
-            print(f"CRITICAL ERROR: {e}")
-            print(error_trace)
+    except Exception as err:
+        print(f"Startup Error: {err}")
+        print(traceback.format_exc())
