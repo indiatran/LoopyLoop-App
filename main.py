@@ -7,7 +7,6 @@ import tempfile
 import threading
 import time
 import tkinter as tk
-import logging
 import traceback
 from tkinter import filedialog, messagebox, ttk
 
@@ -23,6 +22,21 @@ def get_ytdlp():
         return yt_dlp
     except ImportError:
         return None
+
+
+def ensure_ffmpeg():
+    ffmpeg_path = shutil.which("ffmpeg")
+
+    if ffmpeg_path:
+        return ffmpeg_path
+
+    if imageio_ffmpeg:
+        try:
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            pass
+
+    return None
 
 
 class LoopyLoopApp:
@@ -66,17 +80,7 @@ class LoopyLoopApp:
         self.apply_theme()
 
     def find_ffmpeg(self):
-        found = shutil.which("ffmpeg")
-        if found:
-            return found
-
-        if imageio_ffmpeg:
-            try:
-                return imageio_ffmpeg.get_ffmpeg_exe()
-            except Exception:
-                pass
-
-        return None
+        return ensure_ffmpeg()
 
     def update_tool_text(self):
         ffmpeg_status = "FFmpeg: Ready" if self.ffmpeg_path else "FFmpeg: Missing"
@@ -168,7 +172,7 @@ class LoopyLoopApp:
         self.add_widget(
             tk.Label(
                 middle,
-                text="Upgrade: You may select MP3/WAV/M4A or even MP4 video with audio.",
+                text="You may select MP3/WAV/M4A or even MP4 video with audio.",
                 font=("Arial", 8)
             ),
             "small"
@@ -518,9 +522,11 @@ class LoopyLoopApp:
     def validate_inputs(self):
         if not self.ffmpeg_path:
             raise ValueError(
-                "FFmpeg was not found.\n\n"
-                "Run this in your terminal:\n"
+                "FFmpeg is missing.\n\n"
+                "Quick fix:\n"
                 "pip install imageio-ffmpeg\n\n"
+                "Also install yt-dlp if using YouTube URLs:\n"
+                "pip install yt-dlp\n\n"
                 "Then restart the app."
             )
 
@@ -595,16 +601,23 @@ class LoopyLoopApp:
         if yt_dlp is None:
             raise RuntimeError("yt-dlp missing. Run: pip install yt-dlp")
 
+        if not self.ffmpeg_path:
+            raise RuntimeError(
+                "FFmpeg is required for YouTube audio conversion.\n\n"
+                "Run:\n"
+                "pip install imageio-ffmpeg"
+            )
+
         self.safe_ui(lambda: self.status_text.set("Downloading YouTube audio..."))
 
         output_template = os.path.join(temp_dir, "youtube_audio.%(ext)s")
-        ffmpeg_dir = os.path.dirname(self.ffmpeg_path)
 
         options = {
             "format": "bestaudio/best",
             "outtmpl": output_template,
-            "quiet": False,
             "noplaylist": True,
+            "quiet": True,
+            "ffmpeg_location": self.ffmpeg_path,
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
@@ -612,19 +625,18 @@ class LoopyLoopApp:
                     "preferredquality": "192",
                 }
             ],
-            "ffmpeg_location": ffmpeg_dir
         }
 
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
         except Exception as err:
-            raise RuntimeError(f"YouTube download failed: {err}")
+            raise RuntimeError(f"YouTube download failed:\n{err}")
 
         mp3_path = os.path.join(temp_dir, "youtube_audio.mp3")
 
         if not os.path.exists(mp3_path):
-            raise RuntimeError("YouTube audio could not be converted to MP3.")
+            raise RuntimeError("Conversion failed: MP3 file was not created.")
 
         return mp3_path
 
